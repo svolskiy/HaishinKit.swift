@@ -87,9 +87,7 @@ final class AudioEncoder: @unchecked Sendable {
     }
 
     private func makeConverter(_ formatDescription: CMFormatDescription) -> Bool {
-        guard let inputFormat = AVAudioFormat(cmAudioFormatDescription: formatDescription) else {
-            return false
-        }
+        let inputFormat = AVAudioFormat(cmAudioFormatDescription: formatDescription)
         var asbd = AudioStreamBasicDescription(
             mSampleRate: inputFormat.sampleRate,
             mFormatID: kAudioFormatMPEG4AAC,

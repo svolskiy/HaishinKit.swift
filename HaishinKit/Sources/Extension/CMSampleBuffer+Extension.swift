@@ -29,10 +29,10 @@ package extension CMSampleBuffer {
             formatDescription.mediaType == .audio,
             let asbd = formatDescription.audioStreamBasicDescription,
             asbd.mFormatID != kAudioFormatLinearPCM,
-            let dataBuffer,
-            let format = AVAudioFormat(cmAudioFormatDescription: formatDescription) else {
+            let dataBuffer else {
             return []
         }
+        let format = AVAudioFormat(cmAudioFormatDescription: formatDescription)
         let sampleRate = asbd.mSampleRate
         let framesPerPacket = asbd.mFramesPerPacket == 0 ? 1024 : asbd.mFramesPerPacket
         var result: [(AVAudioCompressedBuffer, AVAudioTime)] = []

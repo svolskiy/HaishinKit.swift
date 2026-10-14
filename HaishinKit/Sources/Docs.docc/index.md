@@ -21,6 +21,8 @@ The following features are available:
     - Treats camera video and still images as a single stream source.  
   - Audio Mixing  
     - Combines different microphone audio sources into a single audio stream source.  
+- [Multi streaming](doc://HaishinKit/multistreaming)  
+  - Encodes once with `MediaEncoder` and delivers the encoded buffers to several streams.  
 - Session  
   - Provides a unified API for protocols such as RTMP, SRT, WHEP, and WHIP.  
 

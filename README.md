@@ -17,7 +17,7 @@ Sponsor: [$50 per month](https://github.com/sponsors/shogo4405): Technical suppo
 ## 🎨 Features
 - **Protocols** ✨Publish and playback feature are available [RTMP](RTMPHaishinKit/Sources/Docs.docc/index.md), [SRT](SRTHaishinKit/Sources/Docs.docc/index.md) and [WHEP/WHIP(alpha)](RTCHaishinKit/Sources/Docs.docc/index.md).
 - **Multi Camera access** ✨[Support multitasking camera access.](https://developer.apple.com/documentation/avkit/accessing-the-camera-while-multitasking-on-ipad)
-- **Multi Streaming** ✨Allowing live streaming to separate services. Views also support this, enabling the verification of raw video data.
+- **Multi Streaming** ✨Allowing live streaming to separate services with a single encode: `MediaEncoder` encodes once and fans the encoded buffers out to N streams. Views also support this, enabling the verification of raw video data.
 - **Strict Concurrency** ✨Supports Swift's Strict Concurrency compliance.
 - **Screen Capture** ✨Supports ReplayKit(iOS) and ScreenCaptureKit(macOS) api.
 - **Video mixing** ✨Possible to display any text or bitmap on a video during broadcasting or viewing. This allows for various applications such as watermarking and time display.

@@ -2,7 +2,7 @@ import Foundation
 import VideoToolbox
 
 /// Constraints on the video codec compression settings.
-public struct VideoCodecSettings: Codable, Sendable {
+public struct VideoCodecSettings: Codable, Sendable, Equatable {
     /// The number of frame rate for 30fps.
     public static let frameInterval30 = (1 / 30) - 0.001
     /// The number of frame rate for 10fps.

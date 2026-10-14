@@ -91,6 +91,29 @@ Task {
 }
 ```
 
+### Publish to several services with one encode
+Attach the streams to a `MediaEncoder` instead of the mixer, so the video and audio are encoded only once.
+```swift
+let mixer = MediaMixer()
+let encoder = MediaEncoder()
+let stream1 = RTMPStream(connection: connection1)
+let stream2 = RTMPStream(connection: connection2)
+
+Task {
+  try await encoder.addOutput(stream1)
+  try await encoder.addOutput(stream2)
+  await mixer.addOutput(encoder)
+  await encoder.startRunning()
+  await mixer.startRunning()
+
+  try await connection1.connect("rtmp://a.example.com/live")
+  try await stream1.publish("streamKeyA")
+  try await connection2.connect("rtmp://b.example.com/live")
+  try await stream2.publish("streamKeyB")
+}
+```
+See the HaishinKit module's "Multi streaming" article for details.
+
 ### Authentication
 It supports FME-compatible authentication. Some other services may use their own unique authentication methods, so connection may not be possible in those cases.
 ```swift

@@ -7,8 +7,8 @@ public actor RTCStream {
         case unsupportedCodec
     }
 
-    static let supportedAudioCodecs: [AudioCodecSettings.Format] = [.opus]
-    static let supportedVideoCodecs: [VideoCodecSettings.Format] = [.h264]
+    package static let supportedAudioCodecs: [AudioCodecSettings.Format] = [.opus]
+    package static let supportedVideoCodecs: [VideoCodecSettings.Format] = [.h264]
 
     let id: String = UUID().uuidString
     private(set) var tracks: [RTCSendableStreamTrack] = []
@@ -23,6 +23,8 @@ public actor RTCStream {
     }()
     package var outputs: [any StreamOutput] = []
     package var bitRateStrategy: (any StreamBitRateStrategy)?
+    /// The shared encoder feeding this stream with encoded buffers (nil when the stream encodes by itself).
+    package weak var encoder: MediaEncoder?
     private var direction: RTCDirection = .sendonly
 
     public init() {
@@ -36,6 +38,10 @@ public actor RTCStream {
                 await incoming.startRunning()
             }
         case .sendonly, .sendrecv:
+            if let encoder {
+                // Start the stream with a key frame instead of waiting for the next GOP.
+                Task { await encoder.requestKeyFrame() }
+            }
             outgoing.startRunning()
             Task {
                 for await audio in outgoing.audioOutputStream {
@@ -82,14 +88,18 @@ extension RTCStream: _Stream {
         guard Self.supportedAudioCodecs.contains(audioSettings.format) else {
             throw Error.unsupportedCodec
         }
+        let oldValue = outgoing.audioSettings
         outgoing.audioSettings = audioSettings
+        forwardToEncoder(audioSettings, oldValue: oldValue)
     }
 
     public func setVideoSettings(_ videoSettings: VideoCodecSettings) throws {
         guard Self.supportedVideoCodecs.contains(videoSettings.format) else {
             throw Error.unsupportedCodec
         }
+        let oldValue = outgoing.videoSettings
         outgoing.videoSettings = videoSettings
+        forwardToEncoder(videoSettings, oldValue: oldValue)
     }
 
     public func append(_ sampleBuffer: CMSampleBuffer) {
@@ -102,13 +112,15 @@ extension RTCStream: _Stream {
                     }
                 }
             } else {
-                outgoing.append(sampleBuffer)
+                if encoder == nil {
+                    outgoing.append(sampleBuffer)
+                }
                 outputs.forEach { $0.stream(self, didOutput: sampleBuffer) }
             }
         case .audio:
             if sampleBuffer.formatDescription?.isCompressed == true {
                 Task { await incoming.append(sampleBuffer) }
-            } else {
+            } else if encoder == nil {
                 outgoing.append(sampleBuffer)
             }
         default:
@@ -119,7 +131,9 @@ extension RTCStream: _Stream {
     public func append(_ audioBuffer: AVAudioBuffer, when: AVAudioTime) {
         switch audioBuffer {
         case let audioBuffer as AVAudioPCMBuffer:
-            outgoing.append(audioBuffer, when: when)
+            if encoder == nil {
+                outgoing.append(audioBuffer, when: when)
+            }
             outputs.forEach { $0.stream(self, didOutput: audioBuffer, when: when) }
         case let audioBuffer as AVAudioCompressedBuffer:
             Task {

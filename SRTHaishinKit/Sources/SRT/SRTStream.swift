@@ -6,8 +6,8 @@ import libsrt
 
 /// An actor that provides the interface to control a one-way channel over a SRTConnection.
 public actor SRTStream {
-    static let supportedAudioCodecs: [AudioCodecSettings.Format] = [.aac]
-    static let supportedVideoCodecs: [VideoCodecSettings.Format] = VideoCodecSettings.Format.allCases
+    package static let supportedAudioCodecs: [AudioCodecSettings.Format] = [.aac]
+    package static let supportedVideoCodecs: [VideoCodecSettings.Format] = VideoCodecSettings.Format.allCases
 
     /// The expected medias for transport stream.
     public var expectedMedias: Set<AVMediaType> {
@@ -23,7 +23,13 @@ public actor SRTStream {
     private lazy var reader = TSReader()
     package lazy var incoming = IncomingStream(self)
     package lazy var outgoing = OutgoingStream()
+    /// The shared encoder feeding this stream with encoded buffers (nil when the stream encodes by itself).
+    package weak var encoder: MediaEncoder?
     private weak var connection: SRTConnection?
+    private var isWaitingForKeyFrame = true
+    // Formats of the encoded buffers received from a MediaEncoder. Used for expectedMedias.
+    private var encodedVideoFormat: CMFormatDescription?
+    private var encodedAudioFormat: CMFormatDescription?
 
     /// The error domain codes.
     public enum Error: Swift.Error {
@@ -57,16 +63,30 @@ public actor SRTStream {
             }
             return
         }
+        if let encoder {
+            // The encoder may not have delivered a buffer yet; ask it what it is going to encode.
+            if let videoInputFormat = await encoder.videoInputFormat {
+                encodedVideoFormat = videoInputFormat
+            }
+            if let audioInputFormat = await encoder.audioInputFormat {
+                encodedAudioFormat = audioInputFormat
+            }
+        }
+        isWaitingForKeyFrame = true
         readyState = .publishing
         outgoing.startRunning()
-        if outgoing.videoInputFormat != nil {
+        if outgoing.videoInputFormat != nil || encodedVideoFormat != nil {
             writer.expectedMedias.insert(.video)
         }
-        if outgoing.audioInputFormat != nil {
+        if outgoing.audioInputFormat != nil || encodedAudioFormat != nil {
             writer.expectedMedias.insert(.audio)
         }
         if writer.expectedMedias.isEmpty {
             logger.error("Please set expected media.")
+        }
+        if let encoder {
+            // Start the stream with a key frame instead of waiting for the next GOP.
+            Task { await encoder.requestKeyFrame() }
         }
         Task {
             for await buffer in outgoing.videoOutputStream {
@@ -146,24 +166,42 @@ extension SRTStream: _Stream {
         guard Self.supportedAudioCodecs.contains(audioSettings.format) else {
             throw Error.unsupportedCodec
         }
+        let oldValue = outgoing.audioSettings
         outgoing.audioSettings = audioSettings
+        forwardToEncoder(audioSettings, oldValue: oldValue)
     }
 
     public func setVideoSettings(_ videoSettings: VideoCodecSettings) throws {
         guard Self.supportedVideoCodecs.contains(videoSettings.format) else {
             throw Error.unsupportedCodec
         }
+        let oldValue = outgoing.videoSettings
         outgoing.videoSettings = videoSettings
+        forwardToEncoder(videoSettings, oldValue: oldValue)
     }
 
     public func append(_ sampleBuffer: CMSampleBuffer) {
         switch sampleBuffer.formatDescription?.mediaType {
         case .video:
             if sampleBuffer.formatDescription?.isCompressed == true {
+                encodedVideoFormat = sampleBuffer.formatDescription
+                // A shared encoder keeps delivering while this stream isn't publishing.
+                guard readyState == .publishing else {
+                    return
+                }
+                // The first video access unit after publish must be a key frame.
+                if isWaitingForKeyFrame {
+                    guard !sampleBuffer.isNotSync else {
+                        return
+                    }
+                    isWaitingForKeyFrame = false
+                }
                 writer.videoFormat = sampleBuffer.formatDescription
                 writer.append(sampleBuffer)
             } else {
-                outgoing.append(sampleBuffer)
+                if encoder == nil {
+                    outgoing.append(sampleBuffer)
+                }
                 outputs.forEach { $0.stream(self, didOutput: sampleBuffer) }
             }
         default:
@@ -174,9 +212,15 @@ extension SRTStream: _Stream {
     public func append(_ audioBuffer: AVAudioBuffer, when: AVAudioTime) {
         switch audioBuffer {
         case let audioBuffer as AVAudioPCMBuffer:
-            outgoing.append(audioBuffer, when: when)
+            if encoder == nil {
+                outgoing.append(audioBuffer, when: when)
+            }
             outputs.forEach { $0.stream(self, didOutput: audioBuffer, when: when) }
         case let audioBuffer as AVAudioCompressedBuffer:
+            encodedAudioFormat = audioBuffer.format.formatDescription
+            guard readyState == .publishing else {
+                return
+            }
             writer.audioFormat = audioBuffer.format
             writer.append(audioBuffer, when: when)
         default:

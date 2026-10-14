@@ -171,8 +171,8 @@ public actor RTMPStream {
     }
 
     static let defaultID: UInt32 = 0
-    static let supportedAudioCodecs: [AudioCodecSettings.Format] = [.aac, .opus]
-    static let supportedVideoCodecs: [VideoCodecSettings.Format] = VideoCodecSettings.Format.allCases
+    package static let supportedAudioCodecs: [AudioCodecSettings.Format] = [.aac, .opus]
+    package static let supportedVideoCodecs: [VideoCodecSettings.Format] = VideoCodecSettings.Format.allCases
 
     /// The RTMPStream metadata.
     public private(set) var metadata: AMFArray = .init(count: 0)
@@ -227,7 +227,12 @@ public actor RTMPStream {
     private(set) var id: UInt32 = RTMPStream.defaultID
     package lazy var incoming = IncomingStream(self)
     package lazy var outgoing = OutgoingStream()
+    /// The shared encoder feeding this stream with encoded buffers (nil when the stream encodes by itself).
+    package weak var encoder: MediaEncoder?
     private weak var connection: RTMPConnection?
+    // Formats of the encoded buffers received from a MediaEncoder. Used for metadata and A/V alignment.
+    private var encodedVideoFormat: CMFormatDescription?
+    private var encodedAudioFormat: CMFormatDescription?
 
     private var audioFormat: AVAudioFormat? {
         didSet {
@@ -388,9 +393,22 @@ public actor RTMPStream {
             info.resourceName = name
             howToPublish = type
             startedAt = .init()
+            if let encoder {
+                // The encoder may not have delivered a buffer yet; ask it what it is going to encode.
+                if let videoInputFormat = await encoder.videoInputFormat {
+                    encodedVideoFormat = videoInputFormat
+                }
+                if let audioInputFormat = await encoder.audioInputFormat {
+                    encodedAudioFormat = audioInputFormat
+                }
+            }
             metadata = makeMetadata()
             readyState = .publishing
             try? send("@setDataFrame", arguments: "onMetaData", metadata)
+            if let encoder {
+                // Start the stream with a key frame instead of waiting for the next GOP.
+                Task { await encoder.requestKeyFrame() }
+            }
             outgoing.startRunning()
             Task {
                 for await audio in outgoing.audioOutputStream {
@@ -691,7 +709,7 @@ public actor RTMPStream {
     private func makeMetadata() -> AMFArray {
         // https://github.com/shogo4405/HaishinKit.swift/issues/1410
         var metadata: AMFObject = ["duration": 0]
-        if outgoing.videoInputFormat != nil {
+        if outgoing.videoInputFormat != nil || encodedVideoFormat != nil {
             metadata["width"] = outgoing.videoSettings.videoSize.width
             metadata["height"] = outgoing.videoSettings.videoSize.height
             metadata["videocodecid"] = outgoing.videoSettings.format.codecid
@@ -700,7 +718,7 @@ public actor RTMPStream {
                 metadata["framerate"] = expectedFrameRate
             }
         }
-        if let audioFormat = outgoing.audioInputFormat?.audioStreamBasicDescription {
+        if let audioFormat = (outgoing.audioInputFormat ?? encodedAudioFormat)?.audioStreamBasicDescription {
             metadata["audiocodecid"] = outgoing.audioSettings.format.codecid
             metadata["audiodatarate"] = outgoing.audioSettings.bitRate / 1000
             metadata["audiosamplerate"] = outgoing.audioSettings.format.makeSampleRate(
@@ -717,20 +735,33 @@ extension RTMPStream: _Stream {
         guard Self.supportedAudioCodecs.contains(audioSettings.format) else {
             throw Error.unsupportedCodec
         }
+        let oldValue = outgoing.audioSettings
         outgoing.audioSettings = audioSettings
+        forwardToEncoder(audioSettings, oldValue: oldValue)
     }
 
     public func setVideoSettings(_ videoSettings: VideoCodecSettings) throws {
         guard Self.supportedVideoCodecs.contains(videoSettings.format) else {
             throw Error.unsupportedCodec
         }
+        let oldValue = outgoing.videoSettings
         outgoing.videoSettings = videoSettings
+        forwardToEncoder(videoSettings, oldValue: oldValue)
     }
 
     public func append(_ sampleBuffer: CMSampleBuffer) {
         switch sampleBuffer.formatDescription?.mediaType {
         case .video:
             if sampleBuffer.formatDescription?.isCompressed == true {
+                encodedVideoFormat = sampleBuffer.formatDescription
+                // A shared encoder keeps delivering while this stream isn't publishing.
+                guard readyState == .publishing else {
+                    return
+                }
+                // The first video message after publish must be a key frame.
+                if videoFormat == nil && sampleBuffer.isNotSync {
+                    return
+                }
                 do {
                     let decodeTimeStamp = sampleBuffer.decodeTimeStamp.isValid ? sampleBuffer.decodeTimeStamp : sampleBuffer.presentationTimeStamp
                     let timedelta = try videoTimestamp.update(decodeTimeStamp)
@@ -744,7 +775,9 @@ extension RTMPStream: _Stream {
                     logger.warn(error)
                 }
             } else {
-                outgoing.append(sampleBuffer)
+                if encoder == nil {
+                    outgoing.append(sampleBuffer)
+                }
                 if sampleBuffer.formatDescription?.isCompressed == false {
                     outputs.forEach {
                         switch sampleBuffer.formatDescription?.mediaType {
@@ -770,6 +803,15 @@ extension RTMPStream: _Stream {
     public func append(_ audioBuffer: AVAudioBuffer, when: AVAudioTime) {
         switch audioBuffer {
         case let audioBuffer as AVAudioCompressedBuffer:
+            encodedAudioFormat = audioBuffer.format.formatDescription
+            guard readyState == .publishing else {
+                return
+            }
+            // Both RTMP timelines start at their first message. Hold the audio until the first video key frame
+            // has been accepted, otherwise the audio would run ahead by the time spent waiting for the key frame.
+            if encoder != nil && encodedVideoFormat != nil && videoFormat == nil {
+                return
+            }
             do {
                 let timedelta = try audioTimestamp.update(when)
                 audioFormat = audioBuffer.format
@@ -781,7 +823,9 @@ extension RTMPStream: _Stream {
                 logger.warn(error)
             }
         default:
-            outgoing.append(audioBuffer, when: when)
+            if encoder == nil {
+                outgoing.append(audioBuffer, when: when)
+            }
             if audioBuffer is AVAudioPCMBuffer && audioSampleAccess {
                 outputs.forEach { $0.stream(self, didOutput: audioBuffer, when: when) }
             }

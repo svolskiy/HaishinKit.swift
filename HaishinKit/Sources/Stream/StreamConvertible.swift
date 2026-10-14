@@ -54,13 +54,58 @@ public protocol StreamConvertible: Actor, MediaMixerOutput {
 }
 
 package protocol _Stream: StreamConvertible {
+    /// The audio codecs this stream can transport.
+    static var supportedAudioCodecs: [AudioCodecSettings.Format] { get }
+    /// The video codecs this stream can transport.
+    static var supportedVideoCodecs: [VideoCodecSettings.Format] { get }
+
     var incoming: IncomingStream { get }
     var outgoing: OutgoingStream { get }
     var outputs: [any StreamOutput] { get set }
     var bitRateStrategy: (any StreamBitRateStrategy)? { get set }
+    /// The shared encoder that feeds this stream with already encoded buffers, if any.
+    var encoder: MediaEncoder? { get set }
 }
 
 extension _Stream {
+    /// Attaches (or detaches with nil) a shared MediaEncoder.
+    package func attachEncoder(_ encoder: MediaEncoder?) {
+        self.encoder = encoder
+    }
+
+    /// Forwards new audio settings to the attached shared encoder.
+    ///
+    /// When the encoder rejects the settings (another output can't transport them), the local copy is rolled back
+    /// to the encoder's current value so that `audioSettings` never diverges from what is actually encoded.
+    package func forwardToEncoder(_ audioSettings: AudioCodecSettings, oldValue: AudioCodecSettings) {
+        guard let encoder, audioSettings != oldValue else {
+            return
+        }
+        Task {
+            do {
+                try await encoder.setAudioSettings(audioSettings)
+            } catch {
+                let current = await encoder.audioSettings
+                try? self.setAudioSettings(current)
+            }
+        }
+    }
+
+    /// Forwards new video settings to the attached shared encoder.
+    package func forwardToEncoder(_ videoSettings: VideoCodecSettings, oldValue: VideoCodecSettings) {
+        guard let encoder, videoSettings != oldValue else {
+            return
+        }
+        Task {
+            do {
+                try await encoder.setVideoSettings(videoSettings)
+            } catch {
+                let current = await encoder.videoSettings
+                try? self.setVideoSettings(current)
+            }
+        }
+    }
+
     public var soundTransform: SoundTransform? {
         get async {
             await incoming.soundTransfrom

@@ -2,7 +2,7 @@ import AVFAudio
 import Foundation
 
 /// Constraints on the audio codec compression settings.
-public struct AudioCodecSettings: Codable, Sendable {
+public struct AudioCodecSettings: Codable, Sendable, Equatable {
     /// The default value.
     public static let `default` = AudioCodecSettings()
     /// The default bitRate. The value is 64,000 bps.

@@ -93,6 +93,11 @@ package final class OutgoingStream {
     package func append(video sampleBuffer: CMSampleBuffer) {
         videoCodec.append(sampleBuffer)
     }
+
+    /// Requests the video encoder to emit a key frame as soon as possible.
+    package func requestKeyFrame() {
+        videoCodec.requestKeyFrame()
+    }
 }
 
 extension OutgoingStream: Runner {

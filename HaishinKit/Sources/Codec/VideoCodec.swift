@@ -28,6 +28,7 @@ final class VideoCodec {
     private var startedAt: CMTime = .zero
     private var continuation: AsyncStream<CMSampleBuffer>.Continuation?
     private var invalidateSession = true
+    private var needsKeyFrame = false
     private var presentationTimeStamp: CMTime = .zero
     private(set) var isRunning = false
     private(set) var inputFormat: CMFormatDescription? {
@@ -64,16 +65,24 @@ final class VideoCodec {
                 return
             }
             if sampleBuffer.formatDescription?.isCompressed == true {
-                try session.convert(sampleBuffer, continuation: continuation)
+                try session.convert(sampleBuffer, frameProperties: nil, continuation: continuation)
             } else {
                 if useFrame(sampleBuffer.presentationTimeStamp) {
-                    try session.convert(sampleBuffer, continuation: continuation)
+                    let frameProperties: CFDictionary? = needsKeyFrame ? makeForceKeyFrameProperties() : nil
+                    try session.convert(sampleBuffer, frameProperties: frameProperties, continuation: continuation)
+                    // Consume the request only for a frame that was actually submitted to the encoder.
+                    needsKeyFrame = false
                     presentationTimeStamp = sampleBuffer.presentationTimeStamp
                 }
             }
         } catch {
             logger.warn(error)
         }
+    }
+
+    /// Requests the encoder to emit a key frame for the next submitted frame.
+    func requestKeyFrame() {
+        needsKeyFrame = true
     }
 
     func makeImageBufferAttributes(_ mode: VTSessionMode) -> [NSString: AnyObject]? {
@@ -91,6 +100,11 @@ final class VideoCodec {
                 kCVPixelBufferMetalCompatibilityKey: kCFBooleanTrue
             ]
         }
+    }
+
+    private func makeForceKeyFrameProperties() -> CFDictionary {
+        let properties: [CFString: Any] = [kVTEncodeFrameOptionKey_ForceKeyFrame: true]
+        return properties as CFDictionary
     }
 
     private func useFrame(_ presentationTimeStamp: CMTime) -> Bool {
@@ -161,6 +175,7 @@ extension VideoCodec: Runner {
         isRunning = false
         session = nil
         invalidateSession = true
+        needsKeyFrame = false
         inputFormat = nil
         outputFormat = nil
         presentationTimeStamp = .zero

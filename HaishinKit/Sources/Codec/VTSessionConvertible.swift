@@ -11,7 +11,7 @@ enum VTSessionError: Swift.Error {
 protocol VTSessionConvertible {
     func setOption(_ option: VTSessionOption) -> OSStatus
     func setOptions(_ options: Set<VTSessionOption>) -> OSStatus
-    func convert(_ sampleBuffer: CMSampleBuffer, continuation: AsyncStream<CMSampleBuffer>.Continuation?) throws
+    func convert(_ sampleBuffer: CMSampleBuffer, frameProperties: CFDictionary?, continuation: AsyncStream<CMSampleBuffer>.Continuation?) throws
     func invalidate()
 }
 

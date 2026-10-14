@@ -9,7 +9,7 @@ extension VTCompressionSession {
 
 extension VTCompressionSession: VTSessionConvertible {
     @inline(__always)
-    func convert(_ sampleBuffer: CMSampleBuffer, continuation: AsyncStream<CMSampleBuffer>.Continuation?) throws {
+    func convert(_ sampleBuffer: CMSampleBuffer, frameProperties: CFDictionary?, continuation: AsyncStream<CMSampleBuffer>.Continuation?) throws {
         guard let imageBuffer = sampleBuffer.imageBuffer else {
             return
         }
@@ -19,7 +19,7 @@ extension VTCompressionSession: VTSessionConvertible {
             imageBuffer: imageBuffer,
             presentationTimeStamp: sampleBuffer.presentationTimeStamp,
             duration: sampleBuffer.duration,
-            frameProperties: nil,
+            frameProperties: frameProperties,
             infoFlagsOut: &flags,
             outputHandler: { _, _, sampleBuffer in
                 if let sampleBuffer {

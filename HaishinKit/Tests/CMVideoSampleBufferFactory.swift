@@ -43,7 +43,7 @@ enum CMVideoSampleBufferFactory {
         return sampleBuffer
     }
 
-    static func makeSampleBuffer(width: Int, height: Int) -> CMSampleBuffer? {
+    static func makeSampleBuffer(width: Int, height: Int, presentationTimeStamp: CMTime? = nil) -> CMSampleBuffer? {
         var pixelBuffer: CVPixelBuffer?
         CVPixelBufferCreate(nil, width, height, kCVPixelFormatType_32BGRA, nil, &pixelBuffer)
         guard let pixelBuffer else {
@@ -59,6 +59,13 @@ enum CMVideoSampleBufferFactory {
             return nil
         }
         var timingInfo = CMSampleTimingInfo()
+        if let presentationTimeStamp {
+            timingInfo = CMSampleTimingInfo(
+                duration: CMTime(value: 1, timescale: 30),
+                presentationTimeStamp: presentationTimeStamp,
+                decodeTimeStamp: .invalid
+            )
+        }
         var sampleBuffer: CMSampleBuffer?
         guard CMSampleBufferCreateReadyWithImageBuffer(
             allocator: kCFAllocatorDefault,

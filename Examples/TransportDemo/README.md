@@ -18,13 +18,15 @@ streams, but multi-streaming is the app's responsibility in this mode (see `Exam
    ```
    docker run --rm -p 1935:1935 -p 8554:8554 bluenviron/mediamtx
    ```
-2. Build and run (Xcode 26 / Swift 6 toolchain):
+2. Build and run (Xcode 26 / Swift 6 toolchain): open `Examples/TransportDemo/TransportDemo.xcodeproj` and run the
+   `TransportDemo` scheme. The project references the HaishinKit package two levels up as a local package. The first
+   launch asks for camera and microphone access.
+
+   Alternative without Xcode projects:
    ```
    cd Examples/TransportDemo
    swift run
    ```
-   or `open Package.swift` and run the `TransportDemo` scheme in Xcode. The first launch asks for camera and
-   microphone access.
 3. Press **Start capture**, then **Connect** (default `rtmp://localhost/live`, key `transport`).
 4. Watch the stream:
    ```
@@ -55,5 +57,6 @@ streams, but multi-streaming is the app's responsibility in this mode (see `Exam
 
 ## Notes
 
-- The app is an unbundled SwiftPM executable. `Package.swift` embeds `Info.plist` into the binary with
-  `-sectcreate __TEXT __info_plist` so macOS can show the camera/microphone permission prompts.
+- `TransportDemo.xcodeproj` builds a sandboxed, ad-hoc signed app bundle (`TransportDemo.entitlements`: camera,
+  microphone, network client). With `swift run` the app is an unbundled executable instead; `Package.swift` then
+  embeds `Info.plist` into the binary with `-sectcreate __TEXT __info_plist` so macOS can show the permission prompts.

@@ -11,13 +11,16 @@ the CPU usage of both pipelines with the same number of destinations.
    ```
    docker run --rm -p 1935:1935 -p 8554:8554 bluenviron/mediamtx
    ```
-2. Build and run the demo (Xcode 26 / Swift 6 toolchain):
+2. Build and run the demo (Xcode 26 / Swift 6 toolchain): open `Examples/MultiStreamDemo/MultiStreamDemo.xcodeproj`
+   and run the `MultiStreamDemo` scheme. The project references the HaishinKit package two levels up as a local
+   package, so no checkout of dependencies is needed beyond the usual package resolution. The first launch asks for
+   camera and microphone access.
+
+   Alternative without Xcode projects:
    ```
    cd Examples/MultiStreamDemo
    swift run
    ```
-   or `open Package.swift` and run the `MultiStreamDemo` scheme in Xcode. The first launch asks for camera and
-   microphone access.
 3. Press **Start capture**, then **Connect** on two or three destinations (defaults: `rtmp://localhost/live` with keys
    `stream1`, `stream2`, `stream3`).
 4. Watch the streams:
@@ -41,7 +44,8 @@ the CPU usage of both pipelines with the same number of destinations.
 
 ## Notes
 
-- The app is an unbundled SwiftPM executable. `Package.swift` embeds `Info.plist` into the binary with
-  `-sectcreate __TEXT __info_plist` so macOS can show the camera/microphone permission prompts.
+- `MultiStreamDemo.xcodeproj` builds a sandboxed, ad-hoc signed app bundle (`MultiStreamDemo.entitlements`: camera,
+  microphone, network client). With `swift run` the app is an unbundled executable instead; `Package.swift` then
+  embeds `Info.plist` into the binary with `-sectcreate __TEXT __info_plist` so macOS can show the permission prompts.
 - Destinations use RTMP only; the same `MediaEncoder` can also feed `SRTStream` (AAC only) and `RTCStream`
   (Opus + H.264).

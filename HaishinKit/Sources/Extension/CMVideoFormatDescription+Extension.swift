@@ -2,7 +2,11 @@ import CoreImage
 import CoreMedia
 
 extension CMVideoFormatDescription {
+    /// Whether the described media is compressed (H.264/HEVC video, AAC/Opus audio) rather than raw pixels/PCM.
     package var isCompressed: Bool {
+        if mediaType == .audio {
+            return audioStreamBasicDescription?.mFormatID != kAudioFormatLinearPCM
+        }
         switch CMFormatDescriptionGetMediaSubType(self) {
         case kCVPixelFormatType_1Monochrome,
              kCVPixelFormatType_2Indexed,

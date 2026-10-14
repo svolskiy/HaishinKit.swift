@@ -13,18 +13,21 @@ struct RTMPTimestamp<T: RTMPTimeConvertible> {
         case invalidSequence
     }
 
+    private var isStarted = false
     private var startedAt = kRTMPTimestamp_defaultTimeInterval
     private var updatedAt = kRTMPTimestamp_defaultTimeInterval
     private var timedeltaFraction: TimeInterval = kRTMPTimestamp_defaultTimeInterval
 
     mutating func update(_ value: T) throws -> UInt32 {
-        guard updatedAt < value.seconds else {
-            throw Error.invalidSequence
-        }
-        if startedAt == 0 {
+        // The first value anchors the timeline, whatever it is (an external encoder may start at 0).
+        guard isStarted else {
+            isStarted = true
             startedAt = value.seconds
             updatedAt = value.seconds
             return 0
+        }
+        guard updatedAt < value.seconds else {
+            throw Error.invalidSequence
         }
         var timedelta = (value.seconds - updatedAt) * 1000
         timedeltaFraction += timedelta.truncatingRemainder(dividingBy: 1)
@@ -39,7 +42,8 @@ struct RTMPTimestamp<T: RTMPTimeConvertible> {
     mutating func update(_ message: some RTMPMessage, chunkType: RTMPChunkType) {
         switch chunkType {
         case .zero:
-            if startedAt == 0 {
+            if !isStarted {
+                isStarted = true
                 startedAt = TimeInterval(message.timestamp) / 1000
                 updatedAt = TimeInterval(message.timestamp) / 1000
             } else {
@@ -51,6 +55,7 @@ struct RTMPTimestamp<T: RTMPTimeConvertible> {
     }
 
     mutating func clear() {
+        isStarted = false
         startedAt = kRTMPTimestamp_defaultTimeInterval
         updatedAt = kRTMPTimestamp_defaultTimeInterval
         timedeltaFraction = kRTMPTimestamp_defaultTimeInterval

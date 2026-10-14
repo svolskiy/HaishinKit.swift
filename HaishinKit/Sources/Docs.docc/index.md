@@ -23,6 +23,8 @@ The following features are available:
     - Combines different microphone audio sources into a single audio stream source.  
 - [Multi streaming](doc://HaishinKit/multistreaming)  
   - Encodes once with `MediaEncoder` and delivers the encoded buffers to several streams.  
+- [Transport mode](doc://HaishinKit/transport)  
+  - Appends sample buffers encoded by the app; HaishinKit only packetizes and sends them.  
 - Session  
   - Provides a unified API for protocols such as RTMP, SRT, WHEP, and WHIP.  
 

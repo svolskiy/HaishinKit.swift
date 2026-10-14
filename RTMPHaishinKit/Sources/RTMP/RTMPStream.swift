@@ -230,9 +230,12 @@ public actor RTMPStream {
     /// The shared encoder feeding this stream with encoded buffers (nil when the stream encodes by itself).
     package weak var encoder: MediaEncoder?
     private weak var connection: RTMPConnection?
-    // Formats of the encoded buffers received from a MediaEncoder. Used for metadata and A/V alignment.
+    // Formats of the encoded buffers received from a MediaEncoder or from an external encoder (transport mode).
+    // Used for metadata and A/V alignment.
     private var encodedVideoFormat: CMFormatDescription?
     private var encodedAudioFormat: CMFormatDescription?
+    // onMetaData could not be filled at publish time (no media seen yet); it is sent with the first sequence header.
+    private var isMetadataPending = false
 
     private var audioFormat: AVAudioFormat? {
         didSet {
@@ -241,6 +244,7 @@ public actor RTMPStream {
             }
             switch readyState {
             case .publishing:
+                sendMetadataIfPending()
                 guard let message = RTMPAudioMessage(streamId: id, timestamp: 0, formatDescription: audioFormat?.formatDescription) else {
                     return
                 }
@@ -264,6 +268,7 @@ public actor RTMPStream {
             }
             switch readyState {
             case .publishing:
+                sendMetadataIfPending()
                 guard let message = RTMPVideoMessage(streamId: id, timestamp: 0, formatDescription: videoFormat) else {
                     return
                 }
@@ -404,7 +409,13 @@ public actor RTMPStream {
             }
             metadata = makeMetadata()
             readyState = .publishing
-            try? send("@setDataFrame", arguments: "onMetaData", metadata)
+            if hasKnownMediaFormats {
+                try? send("@setDataFrame", arguments: "onMetaData", metadata)
+            } else {
+                // Transport mode without any buffer appended before publish: send onMetaData together with
+                // the first sequence header, when the formats are known.
+                isMetadataPending = true
+            }
             if let encoder {
                 // Start the stream with a key frame instead of waiting for the next GOP.
                 Task { await encoder.requestKeyFrame() }
@@ -438,6 +449,13 @@ public actor RTMPStream {
             throw Error.invalidState
         }
         outgoing.stopRunning()
+        isMetadataPending = false
+        if encoder == nil {
+            // Without a shared encoder the next publish may carry different media; don't hold audio for a video
+            // that may never come again.
+            encodedVideoFormat = nil
+            encodedAudioFormat = nil
+        }
         return try await withCheckedThrowingContinuation { continutation in
             self.continuation = continutation
             switch readyState {
@@ -705,11 +723,38 @@ public actor RTMPStream {
         }
     }
 
+    /// Whether the stream knows what media it is going to send (needed to fill onMetaData).
+    private var hasKnownMediaFormats: Bool {
+        outgoing.videoInputFormat != nil || encodedVideoFormat != nil ||
+            outgoing.audioInputFormat != nil || encodedAudioFormat != nil
+    }
+
+    private func sendMetadataIfPending() {
+        guard isMetadataPending else {
+            return
+        }
+        isMetadataPending = false
+        metadata = makeMetadata()
+        try? send("@setDataFrame", arguments: "onMetaData", metadata)
+    }
+
     /// Creates flv metadata for a stream.
     private func makeMetadata() -> AMFArray {
         // https://github.com/shogo4405/HaishinKit.swift/issues/1410
         var metadata: AMFObject = ["duration": 0]
-        if outgoing.videoInputFormat != nil || encodedVideoFormat != nil {
+        if let encodedVideoFormat, outgoing.videoInputFormat == nil {
+            // Encoded elsewhere (MediaEncoder or the app): describe what actually arrives.
+            let dimensions = encodedVideoFormat.dimensions
+            metadata["width"] = Double(dimensions.width)
+            metadata["height"] = Double(dimensions.height)
+            metadata["videocodecid"] = encodedVideoFormat.mediaSubType == .hevc
+                ? VideoCodecSettings.Format.hevc.codecid
+                : VideoCodecSettings.Format.h264.codecid
+            metadata["videodatarate"] = outgoing.videoSettings.bitRate / 1000
+            if let expectedFrameRate = outgoing.videoSettings.expectedFrameRate {
+                metadata["framerate"] = expectedFrameRate
+            }
+        } else if outgoing.videoInputFormat != nil {
             metadata["width"] = outgoing.videoSettings.videoSize.width
             metadata["height"] = outgoing.videoSettings.videoSize.height
             metadata["videocodecid"] = outgoing.videoSettings.format.codecid
@@ -718,7 +763,13 @@ public actor RTMPStream {
                 metadata["framerate"] = expectedFrameRate
             }
         }
-        if let audioFormat = (outgoing.audioInputFormat ?? encodedAudioFormat)?.audioStreamBasicDescription {
+        if let encodedAudioFormat, outgoing.audioInputFormat == nil, let audioFormat = encodedAudioFormat.audioStreamBasicDescription {
+            metadata["audiocodecid"] = encodedAudioFormat.mediaSubType == .opus
+                ? AudioCodecSettings.Format.opus.codecid
+                : AudioCodecSettings.Format.aac.codecid
+            metadata["audiodatarate"] = outgoing.audioSettings.bitRate / 1000
+            metadata["audiosamplerate"] = audioFormat.mSampleRate
+        } else if let audioFormat = outgoing.audioInputFormat?.audioStreamBasicDescription {
             metadata["audiocodecid"] = outgoing.audioSettings.format.codecid
             metadata["audiodatarate"] = outgoing.audioSettings.bitRate / 1000
             metadata["audiosamplerate"] = outgoing.audioSettings.format.makeSampleRate(
@@ -795,6 +846,14 @@ extension RTMPStream: _Stream {
                     }
                 }
             }
+        case .audio:
+            // Transport mode: the app encoded the audio (AAC/Opus packets in a CMSampleBuffer).
+            guard sampleBuffer.formatDescription?.isCompressed == true else {
+                return
+            }
+            for (audioBuffer, when) in sampleBuffer.makeCompressedAudioBuffers() {
+                append(audioBuffer, when: when)
+            }
         default:
             break
         }
@@ -807,9 +866,10 @@ extension RTMPStream: _Stream {
             guard readyState == .publishing else {
                 return
             }
-            // Both RTMP timelines start at their first message. Hold the audio until the first video key frame
-            // has been accepted, otherwise the audio would run ahead by the time spent waiting for the key frame.
-            if encoder != nil && encodedVideoFormat != nil && videoFormat == nil {
+            // Both RTMP timelines start at their first message. When video is expected, hold the audio until the
+            // first video key frame has been accepted, otherwise the audio would run ahead by the time spent
+            // waiting for the key frame.
+            if encodedVideoFormat != nil && videoFormat == nil {
                 return
             }
             do {

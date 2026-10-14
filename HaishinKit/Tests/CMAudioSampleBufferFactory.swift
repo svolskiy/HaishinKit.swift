@@ -2,6 +2,79 @@ import AVFoundation
 @testable import HaishinKit
 
 enum CMAudioSampleBufferFactory {
+    /// Makes a compressed (AAC-LC) sample buffer holding the given packets, as an external encoder would.
+    static func makeAAC(packets: [[UInt8]], sampleRate: Double = 48000, channels: UInt32 = 2, presentationTimeStamp: CMTime = .zero) -> CMSampleBuffer? {
+        var asbd = AudioStreamBasicDescription(
+            mSampleRate: sampleRate,
+            mFormatID: kAudioFormatMPEG4AAC,
+            mFormatFlags: UInt32(MPEG4ObjectID.AAC_LC.rawValue),
+            mBytesPerPacket: 0,
+            mFramesPerPacket: 1024,
+            mBytesPerFrame: 0,
+            mChannelsPerFrame: channels,
+            mBitsPerChannel: 0,
+            mReserved: 0
+        )
+        var formatDescription: CMAudioFormatDescription?
+        guard CMAudioFormatDescriptionCreate(
+            allocator: kCFAllocatorDefault,
+            asbd: &asbd,
+            layoutSize: 0,
+            layout: nil,
+            magicCookieSize: 0,
+            magicCookie: nil,
+            extensions: nil,
+            formatDescriptionOut: &formatDescription
+        ) == noErr, let formatDescription else {
+            return nil
+        }
+        let bytes = packets.flatMap { $0 }
+        var blockBuffer: CMBlockBuffer?
+        guard CMBlockBufferCreateWithMemoryBlock(
+            allocator: nil,
+            memoryBlock: nil,
+            blockLength: bytes.count,
+            blockAllocator: nil,
+            customBlockSource: nil,
+            offsetToData: 0,
+            dataLength: bytes.count,
+            flags: 0,
+            blockBufferOut: &blockBuffer
+        ) == noErr, let blockBuffer else {
+            return nil
+        }
+        guard bytes.withUnsafeBytes({ pointer -> OSStatus in
+            guard let baseAddress = pointer.baseAddress else {
+                return -1
+            }
+            return CMBlockBufferReplaceDataBytes(with: baseAddress, blockBuffer: blockBuffer, offsetIntoDestination: 0, dataLength: bytes.count)
+        }) == noErr else {
+            return nil
+        }
+        var offset: Int64 = 0
+        var packetDescriptions: [AudioStreamPacketDescription] = []
+        for packet in packets {
+            packetDescriptions.append(.init(mStartOffset: offset, mVariableFramesInPacket: 0, mDataByteSize: UInt32(packet.count)))
+            offset += Int64(packet.count)
+        }
+        var sampleBuffer: CMSampleBuffer?
+        guard CMAudioSampleBufferCreateWithPacketDescriptions(
+            allocator: nil,
+            dataBuffer: blockBuffer,
+            dataReady: true,
+            makeDataReadyCallback: nil,
+            refcon: nil,
+            formatDescription: formatDescription,
+            sampleCount: packets.count,
+            presentationTimeStamp: presentationTimeStamp,
+            packetDescriptions: packetDescriptions,
+            sampleBufferOut: &sampleBuffer
+        ) == noErr else {
+            return nil
+        }
+        return sampleBuffer
+    }
+
     static func makeSilence(_ sampleRate: Double = 44100, numSamples: Int = 1024, channels: UInt32 = 1, presentaionTimeStamp: CMTime = .zero) -> CMSampleBuffer? {
         var asbd = AudioStreamBasicDescription(
             mSampleRate: sampleRate,

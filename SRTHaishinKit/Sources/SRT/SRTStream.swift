@@ -204,6 +204,14 @@ extension SRTStream: _Stream {
                 }
                 outputs.forEach { $0.stream(self, didOutput: sampleBuffer) }
             }
+        case .audio:
+            // Transport mode: the app encoded the audio (AAC packets in a CMSampleBuffer).
+            guard sampleBuffer.formatDescription?.isCompressed == true else {
+                return
+            }
+            for (audioBuffer, when) in sampleBuffer.makeCompressedAudioBuffers() {
+                append(audioBuffer, when: when)
+            }
         default:
             break
         }

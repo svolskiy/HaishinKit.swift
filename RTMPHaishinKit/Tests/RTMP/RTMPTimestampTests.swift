@@ -23,6 +23,19 @@ import Testing
         #expect(try timestamp.update(times[5]) == 33)
     }
 
+    @Test func updateCMTime_startsAtZero() throws {
+        // An external encoder may start its timeline at 0; the first frame must not be rejected.
+        var timestamp = RTMPTimestamp<CMTime>()
+        #expect(try timestamp.update(CMTime(value: 0, timescale: 30)) == 0)
+        #expect(try timestamp.update(CMTime(value: 1, timescale: 30)) == 33)
+        #expect(try timestamp.update(CMTime(value: 2, timescale: 30)) == 33)
+        #expect(throws: RTMPTimestamp<CMTime>.Error.self) {
+            try timestamp.update(CMTime(value: 2, timescale: 30))
+        }
+        timestamp.clear()
+        #expect(try timestamp.update(CMTime(value: 0, timescale: 30)) == 0)
+    }
+
     @Test func updateAVAudioTime() throws {
         let times: [AVAudioTime] = [
             .init(hostTime: 6901294874500, sampleTime: 13802589749, atRate: 48000),

@@ -119,7 +119,15 @@ extension RTCStream: _Stream {
             }
         case .audio:
             if sampleBuffer.formatDescription?.isCompressed == true {
-                Task { await incoming.append(sampleBuffer) }
+                switch direction {
+                case .sendonly, .sendrecv:
+                    // Transport mode: the app encoded the audio (Opus packets in a CMSampleBuffer).
+                    for (audioBuffer, when) in sampleBuffer.makeCompressedAudioBuffers() {
+                        append(audioBuffer, when: when)
+                    }
+                default:
+                    Task { await incoming.append(sampleBuffer) }
+                }
             } else if encoder == nil {
                 outgoing.append(sampleBuffer)
             }

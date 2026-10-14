@@ -87,6 +87,11 @@ final class TransportViewModel: ObservableObject {
         encodedContinuation = continuation
         videoEncoder.output = { continuation.yield($0) }
         audioEncoder.output = { continuation.yield($0) }
+        audioEncoder.onError = { [weak self] message in
+            Task { @MainActor in
+                self?.report("Audio encoder: \(message). Publishing video only.")
+            }
+        }
         deliveryTask = Task { [weak self] in
             for await sampleBuffer in encoded {
                 guard let self else {

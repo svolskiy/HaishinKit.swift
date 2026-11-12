@@ -30,12 +30,6 @@ final class VideoCodec {
     private var invalidateSession = true
     private var needsKeyFrame = false
     private var presentationTimeStamp: CMTime = .zero
-    // Quiet diagnostics: frames rejected for a non-monotonic PTS (they overtook a sibling on the way
-    // here) are counted and reported at most once per `anomalyReportInterval`. Healthy flow logs nothing.
-    private static let anomalyReportInterval: CFAbsoluteTime = 5
-    private var rejectedOutOfOrder = 0
-    private var maxBackwardStepMs = 0.0
-    private var lastAnomalyReport: CFAbsoluteTime = 0
     private(set) var isRunning = false
     private(set) var inputFormat: CMFormatDescription? {
         didSet {
@@ -118,26 +112,12 @@ final class VideoCodec {
             return false
         }
         guard self.presentationTimeStamp < presentationTimeStamp else {
-            noteOutOfOrder(presentationTimeStamp)
             return false
         }
         guard Self.frameInterval < frameInterval else {
             return true
         }
         return frameInterval <= presentationTimeStamp.seconds - self.presentationTimeStamp.seconds
-    }
-
-    private func noteOutOfOrder(_ pts: CMTime) {
-        rejectedOutOfOrder += 1
-        maxBackwardStepMs = max(maxBackwardStepMs, (presentationTimeStamp - pts).seconds * 1000)
-        let now = CFAbsoluteTimeGetCurrent()
-        guard Self.anomalyReportInterval <= now - lastAnomalyReport else {
-            return
-        }
-        logger.warn("dropped \(rejectedOutOfOrder) out-of-order video frame(s) since last report, max \(Int(maxBackwardStepMs)) ms behind")
-        rejectedOutOfOrder = 0
-        maxBackwardStepMs = 0
-        lastAnomalyReport = now
     }
 
     #if os(iOS) || os(tvOS) || os(visionOS)

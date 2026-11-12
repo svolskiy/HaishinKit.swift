@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreFoundation
+import os
 import VideoToolbox
 #if canImport(UIKit)
 import UIKit
@@ -33,6 +34,7 @@ final class VideoCodec {
     // Quiet diagnostics: frames rejected for a non-monotonic PTS (they overtook a sibling on the way
     // here) are counted and reported at most once per `anomalyReportInterval`. Healthy flow logs nothing.
     private static let anomalyReportInterval: CFAbsoluteTime = 5
+    private static let flowLog = Logger(subsystem: kHaishinKitIdentifier, category: "flow")
     private var rejectedOutOfOrder = 0
     private var maxBackwardStepMs = 0.0
     private var lastAnomalyReport: CFAbsoluteTime = 0
@@ -134,7 +136,8 @@ final class VideoCodec {
         guard Self.anomalyReportInterval <= now - lastAnomalyReport else {
             return
         }
-        logger.warn("dropped \(rejectedOutOfOrder) out-of-order video frame(s) since last report, max \(Int(maxBackwardStepMs)) ms behind")
+        // os.Logger with public arguments: Logboard prints to stdout, which is invisible from an app extension.
+        Self.flowLog.notice("dropped \(self.rejectedOutOfOrder, privacy: .public) out-of-order video frame(s) since last report, max \(Int(self.maxBackwardStepMs), privacy: .public) ms behind")
         rejectedOutOfOrder = 0
         maxBackwardStepMs = 0
         lastAnomalyReport = now

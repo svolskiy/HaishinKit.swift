@@ -233,6 +233,8 @@ public actor RTMPStream {
     // Formats of the encoded buffers received from a MediaEncoder or from an external encoder (transport mode).
     // Used for metadata and A/V alignment.
     private var encodedVideoFormat: CMFormatDescription?
+    /// A shared MediaEncoder has seen raw video, so onMetaData can be built from the mirrored settings.
+    private var hasEncoderVideo = false
     private var encodedAudioFormat: CMFormatDescription?
     // onMetaData could not be filled at publish time (no media seen yet); it is sent with the first sequence header.
     private var isMetadataPending = false
@@ -399,9 +401,11 @@ public actor RTMPStream {
             howToPublish = type
             startedAt = .init()
             if let encoder {
-                // The encoder may not have delivered a buffer yet; ask it what it is going to encode.
-                if let videoInputFormat = await encoder.videoInputFormat {
-                    encodedVideoFormat = videoInputFormat
+                // The encoder may not have delivered a buffer yet; ask it what it is going to encode. Its input
+                // formats are the *raw* ones, so onMetaData must describe the encoder's output settings, not
+                // the input dimensions (a 1080p stream fed from a 720p camera is still 1080p).
+                if await encoder.videoInputFormat != nil {
+                    hasEncoderVideo = true
                 }
                 if let audioInputFormat = await encoder.audioInputFormat {
                     encodedAudioFormat = audioInputFormat
@@ -454,6 +458,7 @@ public actor RTMPStream {
             // Without a shared encoder the next publish may carry different media; don't hold audio for a video
             // that may never come again.
             encodedVideoFormat = nil
+            hasEncoderVideo = false
             encodedAudioFormat = nil
         }
         return try await withCheckedThrowingContinuation { continutation in
@@ -725,7 +730,7 @@ public actor RTMPStream {
 
     /// Whether the stream knows what media it is going to send (needed to fill onMetaData).
     private var hasKnownMediaFormats: Bool {
-        outgoing.videoInputFormat != nil || encodedVideoFormat != nil ||
+        outgoing.videoInputFormat != nil || encodedVideoFormat != nil || hasEncoderVideo ||
             outgoing.audioInputFormat != nil || encodedAudioFormat != nil
     }
 
@@ -754,7 +759,8 @@ public actor RTMPStream {
             if let expectedFrameRate = outgoing.videoSettings.expectedFrameRate {
                 metadata["framerate"] = expectedFrameRate
             }
-        } else if outgoing.videoInputFormat != nil {
+        } else if outgoing.videoInputFormat != nil || hasEncoderVideo {
+            // Own encoder, or a MediaEncoder whose settings are mirrored here: the output size is known.
             metadata["width"] = outgoing.videoSettings.videoSize.width
             metadata["height"] = outgoing.videoSettings.videoSize.height
             metadata["videocodecid"] = outgoing.videoSettings.format.codecid

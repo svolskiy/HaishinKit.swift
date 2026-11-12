@@ -1,6 +1,5 @@
 import AVFoundation
 import Foundation
-import os
 
 /// An object that provides a stream ingest feature.
 package final class OutgoingStream {
@@ -62,7 +61,6 @@ package final class OutgoingStream {
     private var videoCodec = VideoCodec()
     // Quiet diagnostics: raw frames discarded because the encoder fell behind the bounded input
     // buffer (`videoInputBufferCounts`). Reported at most once per 5 s; healthy flow logs nothing.
-    private static let flowLog = Logger(subsystem: kHaishinKitIdentifier, category: "flow")
     private var overflowDrops = 0
     private var lastOverflowReport: CFAbsoluteTime = 0
     private var videoInputContinuation: AsyncStream<CMSampleBuffer>.Continuation? {
@@ -103,7 +101,7 @@ package final class OutgoingStream {
         guard 5 <= now - lastOverflowReport else {
             return
         }
-        Self.flowLog.notice("encoder input buffer full: discarded \(self.overflowDrops, privacy: .public) raw video frame(s) since last report")
+        logger.warn("encoder input buffer full: discarded \(overflowDrops) raw video frame(s) since last report")
         overflowDrops = 0
         lastOverflowReport = now
     }

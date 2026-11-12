@@ -59,6 +59,10 @@ package final class OutgoingStream {
 
     private var audioCodec = AudioCodec()
     private var videoCodec = VideoCodec()
+    // Quiet diagnostics: raw frames discarded because the encoder fell behind the bounded input
+    // buffer (`videoInputBufferCounts`). Reported at most once per 5 s; healthy flow logs nothing.
+    private var overflowDrops = 0
+    private var lastOverflowReport: CFAbsoluteTime = 0
     private var videoInputContinuation: AsyncStream<CMSampleBuffer>.Continuation? {
         didSet {
             oldValue?.finish()
@@ -77,7 +81,9 @@ package final class OutgoingStream {
             audioCodec.append(sampleBuffer)
         case .video:
             videoInputFormat = sampleBuffer.formatDescription
-            videoInputContinuation?.yield(sampleBuffer)
+            if case .dropped(_)? = videoInputContinuation?.yield(sampleBuffer) {
+                noteInputOverflow()
+            }
         default:
             break
         }
@@ -87,6 +93,17 @@ package final class OutgoingStream {
     package func append(_ audioBuffer: AVAudioBuffer, when: AVAudioTime) {
         audioInputFormat = audioBuffer.format.formatDescription
         audioCodec.append(audioBuffer, when: when)
+    }
+
+    private func noteInputOverflow() {
+        overflowDrops += 1
+        let now = CFAbsoluteTimeGetCurrent()
+        guard 5 <= now - lastOverflowReport else {
+            return
+        }
+        logger.warn("encoder input buffer full: discarded \(overflowDrops) raw video frame(s) since last report")
+        overflowDrops = 0
+        lastOverflowReport = now
     }
 
     /// Appends a video buffer.
